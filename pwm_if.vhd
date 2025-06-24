@@ -75,7 +75,7 @@ architecture Behavioral of pwm_if is
             S3_OUT   : out std_logic;
             S4_OUT   : out std_logic;
             S5_OUT   : out std_logic;
-            S6_OUT   : out std_logic;
+            S6_OUT   : out std_logic
         );
     end component;
 
