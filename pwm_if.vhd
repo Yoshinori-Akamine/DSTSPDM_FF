@@ -37,10 +37,10 @@ entity pwm_if is
         GATE_EN  : in std_logic;
 
         -- my costom
-            TPDM : in std_logic_vector (15 downto 0);
-            M : in std_logic_vector (3 downto 0);
-            N : in std_logic_vector (3 downto 0);
-            TD : in std_logic_vector (7 downto 0)
+        TPDM : in std_logic_vector (15 downto 0);
+        M : in std_logic_vector (3 downto 0);
+        N : in std_logic_vector (3 downto 0);
+        TD : in std_logic_vector (7 downto 0)
     );
 end pwm_if;
 
@@ -402,19 +402,19 @@ end dstspdm_ff_if;
 
 architecture Behavioral of dstspdm_ff_if is
 
-  signal inv_output : std_logic := '0';
-  signal rect_output : std_logic := '0';
+  signal inv_output : std_logic := '0'; -- インバータ出力制御信号
+  signal rect_output : std_logic := '0'; -- 整流器出力制御信号
 
-  signal in1_delayed : std_logic := '0';
-  signal in2_delayed : std_logic := '0';
-  signal in3_delayed : std_logic := '0';
-  signal in4_delayed : std_logic := '0';
-  signal s1_edge_ref : std_logic := '0';
+  signal in1_delayed : std_logic := '0'; -- pwm_up保持用
+  signal in2_delayed : std_logic := '0'; -- pwm_un保持用
+  signal in3_delayed : std_logic := '0'; -- pwm_vp保持用
+  signal in4_delayed : std_logic := '0'; -- pwm_vn保持用
+  signal s1_edge_ref : std_logic := '0'; -- 1次側エッジ検出用（pwm_upを監視）
 
-  signal inv_counter : unsigned(15 downto 0) := (others => '0');
-  signal m_count : unsigned(3 downto 0) := (others => '0');
+  signal inv_counter : unsigned(15 downto 0) := (others => '0'); -- 周期カウント用（1次側）
+  signal m_count : unsigned(3 downto 0) := (others => '0'); -- 1次側スキップ幅Mのカウント用
 
-  signal in56_delay_line : std_logic_vector(294 downto 0) := (others => '0');
+  signal rect_delay : std_logic_vector(293 downto 0) := (others => '0'); -- 294クロック↔1/4周期遅延用信号
   signal s5_edge_ref : std_logic := '0';
 
   signal rect_counter : unsigned(15 downto 0) := (others => '0');
@@ -443,16 +443,16 @@ begin
         s1_edge_ref <= S1_IN; -- エッジ検出用のリファレンス
 
         if (S1_IN /= s1_edge_ref) then  -- エッジ検出
-          if inv_counter >= unsigned(TPDM) then
+          if inv_counter >= unsigned(TPDM) - 1 then -- カウンタが周期に到達したら値をリセット
             inv_counter <= (others => '0');
             m_count <= unsigned(M);
           else
-            inv_counter <= inv_counter + 1;
             if inv_counter < m_count then
               inv_output <= '0';
             else
               inv_output <= '1';
             end if;
+            inv_counter <= inv_counter + 1;
           end if;
         end if;
 
@@ -465,17 +465,14 @@ begin
   begin
     if rising_edge(CLK_IN) then
       if RESET_IN = '1' then
-        in56_delay_line <= (others => '0');
         s5_edge_ref <= '0';
         rect_output <= '0';
         rect_counter <= (others => '0');
         n_count <= (others => '0');
       else
-        -- 295クロック遅延（in56_delay_lineの最上位ビット（294)が所望の信号）
-        in56_delay_line <= in56_delay_line(293 downto 0) & S1_IN; -- 1ビットずらし（下294+1ビット目にS1_INを格納）
-
-        if (in56_delay_line(294) /= s5_edge_ref) then  -- エッジ検出
-          if rect_counter >= unsigned(TPDM) then
+        s5_edge_ref <= S1_IN; -- エッジ検出用のリファレンス
+        if (S1_IN /= s5_edge_ref) then  -- エッジ検出
+          if rect_counter >= unsigned(TPDM) - 1 then
             rect_counter <= (others => '0');
             n_count <= unsigned(N);
           else
@@ -487,10 +484,22 @@ begin
             end if;
           end if;
         end if;
-
-        s5_edge_ref <= in56_delay_line(294);
       end if;
     end if;
+  end process;
+
+  process(CLK_IN)
+  begin
+      if rising_edge(CLK_IN) then
+          if RESET_IN = '1' then
+              rect_delay <= (others => '0');
+          else
+              for i in 293 downto 1 loop
+                  rect_delay(i) <= rect_delay(i-1);
+              end loop;
+              rect_delay(0) <= rect_output;
+          end if;
+      end if;
   end process;
 
   -- 出力信号制御 ok!
@@ -499,7 +508,7 @@ begin
   S3_OUT <= in3_delayed when inv_output = '1' else '0';
   S4_OUT <= in4_delayed when inv_output = '1' else '1';
 
-  S5_OUT <= '0' when rect_output = '1' else '1';
-  S6_OUT <= '0' when rect_output = '1' else '1';
+  S5_OUT <= '0' when rect_delay(293) = '1' else '1';
+  S6_OUT <= '0' when rect_delay(293) = '1' else '1';
 
 end Behavioral;
