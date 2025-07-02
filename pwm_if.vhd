@@ -5,7 +5,7 @@
 -- Tool Versions: Vivado 2016.4
 -- Create Date: 2017/01/10
 -- Revision: 2.0
--- Last Modified: 2025/06/23
+-- Last Modified: 2025/07/02
 ----------------------------------------------------------------------------------
 
 library ieee;
@@ -277,12 +277,12 @@ begin
             S6_OUT   => pwm_wn_dsts_ff
         );
 
-    dt_up : deadtime_if port map (CLK_IN => CLK_IN, RESET_IN => RESET_IN, DT => dt_bb, G_IN => pwm_up, G_OUT => pwm_up_dt);
-    dt_un : deadtime_if port map (CLK_IN => CLK_IN, RESET_IN => RESET_IN, DT => dt_bb, G_IN => pwm_un, G_OUT => pwm_un_dt);
-    dt_vp : deadtime_if port map (CLK_IN => CLK_IN, RESET_IN => RESET_IN, DT => dt_bb, G_IN => pwm_vp, G_OUT => pwm_vp_dt);
-    dt_vn : deadtime_if port map (CLK_IN => CLK_IN, RESET_IN => RESET_IN, DT => dt_bb, G_IN => pwm_vn, G_OUT => pwm_vn_dt);
-    dt_wp : deadtime_if port map (CLK_IN => CLK_IN, RESET_IN => RESET_IN, DT => dt_bb, G_IN => pwm_wp, G_OUT => pwm_wp_dt);
-    dt_wn : deadtime_if port map (CLK_IN => CLK_IN, RESET_IN => RESET_IN, DT => dt_bb, G_IN => pwm_wn, G_OUT => pwm_wn_dt);
+    dt_up : deadtime_if port map (CLK_IN => CLK_IN, RESET_IN => RESET_IN, DT => dt_bb, G_IN => pwm_up_dsts_ff, G_OUT => pwm_up_dt);
+    dt_un : deadtime_if port map (CLK_IN => CLK_IN, RESET_IN => RESET_IN, DT => dt_bb, G_IN => pwm_un_dsts_ff, G_OUT => pwm_un_dt);
+    dt_vp : deadtime_if port map (CLK_IN => CLK_IN, RESET_IN => RESET_IN, DT => dt_bb, G_IN => pwm_vp_dsts_ff, G_OUT => pwm_vp_dt);
+    dt_vn : deadtime_if port map (CLK_IN => CLK_IN, RESET_IN => RESET_IN, DT => dt_bb, G_IN => pwm_vn_dsts_ff, G_OUT => pwm_vn_dt);
+    dt_wp : deadtime_if port map (CLK_IN => CLK_IN, RESET_IN => RESET_IN, DT => dt_bb, G_IN => pwm_wp_dsts_ff, G_OUT => pwm_wp_dt);
+    dt_wn : deadtime_if port map (CLK_IN => CLK_IN, RESET_IN => RESET_IN, DT => dt_bb, G_IN => pwm_wn_dsts_ff, G_OUT => pwm_wn_dt);
 
     nPWM_UP_OUT <= not (pwm_up_dt and gate_en_b);
     nPWM_UN_OUT <= not (pwm_un_dt and gate_en_b);
@@ -404,6 +404,7 @@ architecture Behavioral of dstspdm_ff_if is
 
   signal inv_output : std_logic := '0'; -- インバータ出力制御信号
   signal rect_output : std_logic := '0'; -- 整流器出力制御信号
+  signal rect_real : std_logic := '0'; -- デバッグ用信号
 
   signal in1_delayed : std_logic := '0'; -- pwm_up保持用
   signal in2_delayed : std_logic := '0'; -- pwm_un保持用
@@ -414,11 +415,24 @@ architecture Behavioral of dstspdm_ff_if is
   signal inv_counter : unsigned(15 downto 0) := (others => '0'); -- 周期カウント用（1次側）
   signal m_count : unsigned(3 downto 0) := (others => '0'); -- 1次側スキップ幅Mのカウント用
 
-  signal rect_delay : std_logic_vector(293 downto 0) := (others => '0'); -- 294クロック↔1/4周期遅延用信号
+  signal rect_delay : std_logic_vector(293 downto 0) := (others => '0'); -- 294クロック?1/4周期遅延用信号
   signal s5_edge_ref : std_logic := '0';
 
   signal rect_counter : unsigned(15 downto 0) := (others => '0');
   signal n_count : unsigned(3 downto 0) := (others => '0');
+  signal td_count : unsigned(7 downto 0) := (others => '0');
+  
+  -- my attribute
+   attribute mark_debug : string;
+   attribute mark_debug of inv_output : signal is "true";
+   attribute mark_debug of rect_output : signal is "true";
+   attribute mark_debug of rect_real : signal is "true";
+   attribute mark_debug of inv_counter : signal is "true";
+   attribute mark_debug of m_count : signal is "true";
+   attribute mark_debug of rect_counter : signal is "true";
+   attribute mark_debug of n_count : signal is "true";
+   attribute mark_debug of s1_edge_ref : signal is "true";
+   attribute mark_debug of s5_edge_ref : signal is "true";
 
 begin
 
@@ -443,7 +457,7 @@ begin
         s1_edge_ref <= S1_IN; -- エッジ検出用のリファレンス
 
         if (S1_IN /= s1_edge_ref) then  -- エッジ検出
-          if inv_counter >= unsigned(TPDM) - 1 then -- カウンタが周期に到達したら値をリセット
+          if inv_counter >= unsigned(TPDM)-1 then -- カウンタが周期に到達したら値をリセット
             inv_counter <= (others => '0');
             m_count <= unsigned(M);
           else
@@ -452,7 +466,7 @@ begin
             else
               inv_output <= '1';
             end if;
-            inv_counter <= inv_counter + 1;
+            inv_counter <= inv_counter + 1; -- これは正しく動いている
           end if;
         end if;
 
@@ -469,15 +483,19 @@ begin
         rect_output <= '0';
         rect_counter <= (others => '0');
         n_count <= (others => '0');
+        td_count <= (others => '0');
       else
         s5_edge_ref <= S1_IN; -- エッジ検出用のリファレンス
         if (S1_IN /= s5_edge_ref) then  -- エッジ検出
-          if rect_counter >= unsigned(TPDM) - 1 then
+          if rect_counter >= unsigned(TPDM)-1 then
             rect_counter <= (others => '0');
             n_count <= unsigned(N);
+            td_count <= unsigned(TD);
           else
-            rect_counter <= rect_counter + 1;
-            if rect_counter < n_count then
+            rect_counter <= rect_counter + 1; -- これは正しく動いている
+            if rect_counter < td_count then
+              rect_output <= '1';
+            elsif rect_counter < td_count + n_count then
               rect_output <= '0';
             else
               rect_output <= '1';
@@ -488,6 +506,7 @@ begin
     end if;
   end process;
 
+  -- 整流器側を1/4周期遅らせる
   process(CLK_IN)
   begin
       if rising_edge(CLK_IN) then
@@ -498,6 +517,7 @@ begin
                   rect_delay(i) <= rect_delay(i-1);
               end loop;
               rect_delay(0) <= rect_output;
+              rect_real <= rect_delay(293);
           end if;
       end if;
   end process;
